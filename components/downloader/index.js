@@ -114,7 +114,7 @@ const CLI_REGISTRY = {
     npm: '@githubnext/github-copilot-cli',
     github: 'github/copilot-cli',
     build: {
-      entryPoint: 'cli.js',
+      entryPoint: 'dist/index.js',  // Bundled entry
       envPrefix: 'COPILOT',
       binaryName: 'copilot',
     },
@@ -128,16 +128,32 @@ const CLI_REGISTRY = {
   'gemini': {
     name: 'Google Gemini CLI',
     description: 'AI coding assistant by Google',
-    npm: '@anthropic-ai/claude-code',  // Placeholder - update when available
+    npm: '@google/gemini-cli',
     github: 'google-gemini/gemini-cli',
     build: {
-      entryPoint: 'cli.js',
+      entryPoint: 'dist/index.js',  // Compiled TypeScript entry
       envPrefix: 'GEMINI',
       binaryName: 'gemini',
     },
     files: [],
     vendor: [],
-    placeholder: true,  // Gemini CLI npm package TBD
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SOURCEGRAPH CODY CLI - Sourcegraph's AI coding assistant
+  // ─────────────────────────────────────────────────────────────────────────────
+  'cody': {
+    name: 'Sourcegraph Cody CLI',
+    description: 'AI coding assistant by Sourcegraph',
+    npm: '@sourcegraph/cody-cli',
+    github: 'sourcegraph/cody',
+    build: {
+      entryPoint: 'cli.js',
+      envPrefix: 'CODY',
+      binaryName: 'cody',
+    },
+    files: [],
+    vendor: [],
   },
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -470,30 +486,103 @@ async function downloadFromGitHub(owner, repo, assetName, destPath, onProgress) 
  * @returns {Promise<string>} - Path to extracted directory
  */
 async function extractTarball(tarballPath, destDir) {
-  return new Promise((resolve, reject) => {
-    // Ensure destination exists
-    if (!fs.existsSync(destDir)) {
-      fs.mkdirSync(destDir, { recursive: true });
+  // Ensure destination exists
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
+
+  const isWindows = process.platform === 'win32';
+  const { execSync } = require('child_process');
+
+  // Method 1: Try system tar (works on most systems)
+  try {
+    execSync(`tar -xzf "${tarballPath}" -C "${destDir}"`, { stdio: 'pipe' });
+    return destDir;
+  } catch (e) {
+    // tar not available, try alternatives
+  }
+
+  // Method 2: Windows - Use PowerShell with .NET classes
+  if (isWindows) {
+    try {
+      // First decompress .gz to .tar
+      const tarPath = tarballPath.replace(/\.tgz$|\.tar\.gz$/, '.tar');
+
+      const psScript = `
+        $ErrorActionPreference = 'Stop'
+        $gzPath = '${tarballPath.replace(/\\/g, '/')}'
+        $tarPath = '${tarPath.replace(/\\/g, '/')}'
+        $destDir = '${destDir.replace(/\\/g, '/')}'
+
+        # Decompress gzip
+        $gzStream = [System.IO.File]::OpenRead($gzPath)
+        $tarStream = [System.IO.File]::Create($tarPath)
+        $gzip = New-Object System.IO.Compression.GZipStream($gzStream, [System.IO.Compression.CompressionMode]::Decompress)
+        $gzip.CopyTo($tarStream)
+        $gzip.Close()
+        $tarStream.Close()
+        $gzStream.Close()
+
+        # Extract tar using Windows tar (available in Windows 10+)
+        tar -xf "$tarPath" -C "$destDir"
+        Remove-Item $tarPath -Force
+      `;
+
+      execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+        stdio: 'pipe',
+        timeout: 60000
+      });
+      return destDir;
+    } catch (e) {
+      // PowerShell method failed, try Node.js
     }
+  }
 
-    // Use system tar command
-    const isWindows = process.platform === 'win32';
-    const tarCmd = isWindows ? 'tar' : 'tar';
-    const args = ['-xzf', tarballPath, '-C', destDir];
+  // Method 3: Pure Node.js (fallback)
+  const zlib = require('zlib');
+  return new Promise((resolve, reject) => {
+    const gunzip = zlib.createGunzip();
+    const input = fs.createReadStream(tarballPath);
+    const chunks = [];
 
-    const tar = spawn(tarCmd, args, { stdio: 'pipe' });
+    gunzip.on('data', chunk => chunks.push(chunk));
+    gunzip.on('end', () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        let offset = 0;
 
-    tar.on('close', (code) => {
-      if (code === 0) {
+        while (offset < buffer.length - 512) {
+          const header = buffer.slice(offset, offset + 512);
+          if (header.every(b => b === 0)) break;
+
+          const name = header.slice(0, 100).toString('utf8').replace(/\0/g, '').trim();
+          const sizeOctal = header.slice(124, 136).toString('utf8').replace(/\0/g, '').trim();
+          const typeFlag = header[156];
+          const prefix = header.slice(345, 500).toString('utf8').replace(/\0/g, '').trim();
+
+          const size = parseInt(sizeOctal, 8) || 0;
+          const fullPath = prefix ? path.join(prefix, name) : name;
+          const destPath = path.join(destDir, fullPath);
+
+          offset += 512;
+
+          if (name && fullPath) {
+            if (typeFlag === 53 || name.endsWith('/')) {
+              fs.mkdirSync(destPath, { recursive: true });
+            } else if (typeFlag === 0 || typeFlag === 48) {
+              fs.mkdirSync(path.dirname(destPath), { recursive: true });
+              fs.writeFileSync(destPath, buffer.slice(offset, offset + size));
+            }
+          }
+          offset += Math.ceil(size / 512) * 512;
+        }
         resolve(destDir);
-      } else {
-        reject(new Error(`tar extraction failed with code ${code}`));
+      } catch (err) {
+        reject(err);
       }
     });
-
-    tar.on('error', (err) => {
-      reject(new Error(`Failed to run tar: ${err.message}`));
-    });
+    gunzip.on('error', reject);
+    input.pipe(gunzip);
   });
 }
 
