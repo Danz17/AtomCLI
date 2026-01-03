@@ -1,0 +1,217 @@
+#!/usr/bin/env bun
+
+/**
+ * Build script for creating single-file executables from Claude Code package
+ * Uses Bun's native embedding features with all optimizations enabled
+ *
+ * Usage:
+ *   bun run build-executables.js           # Build all platforms
+ *   bun run build-executables.js linux     # Build Linux executables only
+ *   bun run build-executables.js macos     # Build macOS executables only
+ *   bun run build-executables.js windows   # Build Windows executables only
+ *   bun run build-executables.js current   # Build for current platform only
+ */
+
+import { spawn } from 'child_process';
+import { mkdir, rm } from 'fs/promises';
+import { existsSync } from 'fs';
+import { join } from 'path';
+
+const PLATFORMS = {
+  linux: [
+    { target: 'bun-linux-x64', output: 'claude-code-linux-x64' },
+    { target: 'bun-linux-x64-modern', output: 'claude-code-linux-x64-modern' },
+    { target: 'bun-linux-x64-baseline', output: 'claude-code-linux-x64-baseline' },
+    { target: 'bun-linux-arm64', output: 'claude-code-linux-arm64' },
+    { target: 'bun-linux-x64-musl', output: 'claude-code-linux-x64-musl' },
+    { target: 'bun-linux-x64-musl-modern', output: 'claude-code-linux-x64-musl-modern' },
+    { target: 'bun-linux-x64-musl-baseline', output: 'claude-code-linux-x64-musl-baseline' },
+    { target: 'bun-linux-arm64-musl', output: 'claude-code-linux-arm64-musl' }
+  ],
+  macos: [
+    { target: 'bun-darwin-x64', output: 'claude-code-macos-x64' },
+    { target: 'bun-darwin-x64-modern', output: 'claude-code-macos-x64-modern' },
+    { target: 'bun-darwin-x64-baseline', output: 'claude-code-macos-x64-baseline' },
+    { target: 'bun-darwin-arm64', output: 'claude-code-macos-arm64' }
+  ],
+  windows: [
+    { target: 'bun-windows-x64', output: 'claude-code-windows-x64.exe' },
+    { target: 'bun-windows-x64-modern', output: 'claude-code-windows-x64-modern.exe' },
+    { target: 'bun-windows-x64-baseline', output: 'claude-code-windows-x64-baseline.exe' }
+  ]
+};
+
+async function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    console.log(`Running: ${command} ${args.join(' ')}`);
+    const child = spawn(command, args, { stdio: 'inherit' });
+
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Command failed with exit code ${code}`));
+      }
+    });
+  });
+}
+
+async function prepareBundle() {
+  console.log('\nPreparing bundle with native Bun embedding...');
+  await runCommand('bun', ['run', 'scripts/build/prepare-bundle-native.js']);
+}
+
+async function prepareWindowsBundle() {
+  console.log('\nPreparing Windows-specific bundle...');
+  await runCommand('bun', ['run', 'scripts/build/prepare-windows-bundle.js']);
+}
+
+async function buildExecutable(target, output, isWindows = false) {
+  console.log(`\nBuilding ${output}...`);
+  const startTime = Date.now();
+
+  try {
+    const sourceFile = isWindows ? '.windows-build-temp/cli-windows.js' : './cli-native-bundled.js';
+
+    await runCommand('bun', [
+      'build',
+      '--compile',
+      '--minify',
+      '--sourcemap',
+      `--target=${target}`,
+      sourceFile,
+      `--outfile=dist/${output}`
+    ]);
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✓ Built ${output} in ${elapsed}s`);
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function cleanupBundledFile() {
+  const filesToClean = ['./cli-bundled.js', './cli-native-bundled.js'];
+  for (const file of filesToClean) {
+    if (existsSync(file)) {
+      await rm(file);
+    }
+  }
+
+  if (existsSync('.windows-build-temp')) {
+    await rm('.windows-build-temp', { recursive: true, force: true });
+  }
+
+  console.log('\n✓ Cleaned up temporary files');
+}
+
+async function getCurrentPlatform() {
+  const arch = process.arch === 'x64' ? 'x64' : 'arm64';
+  const platform = process.platform === 'darwin' ? 'darwin' :
+                   process.platform === 'linux' ? 'linux' :
+                   process.platform === 'win32' ? 'windows' : null;
+
+  if (!platform) {
+    throw new Error(`Unsupported platform: ${process.platform}`);
+  }
+
+  return `bun-${platform}-${arch}`;
+}
+
+async function main() {
+  const arg = process.argv[2];
+
+  if (!existsSync('dist')) {
+    await mkdir('dist', { recursive: true });
+  }
+
+  let platformsToBuild = [];
+
+  if (!arg || arg === 'all') {
+    platformsToBuild = [
+      ...PLATFORMS.linux,
+      ...PLATFORMS.macos,
+      ...PLATFORMS.windows
+    ];
+  } else if (arg === 'linux') {
+    platformsToBuild = PLATFORMS.linux;
+  } else if (arg === 'macos' || arg === 'darwin') {
+    platformsToBuild = PLATFORMS.macos;
+  } else if (arg === 'windows' || arg === 'win32') {
+    platformsToBuild = PLATFORMS.windows;
+  } else if (arg === 'current') {
+    const currentTarget = await getCurrentPlatform();
+    const allPlatforms = [
+      ...PLATFORMS.linux,
+      ...PLATFORMS.macos,
+      ...PLATFORMS.windows
+    ];
+    const current = allPlatforms.find(p => p.target === currentTarget);
+    if (current) {
+      platformsToBuild = [current];
+    } else {
+      console.error(`Current platform ${currentTarget} not found in build targets`);
+      process.exit(1);
+    }
+  } else {
+    console.error(`Unknown argument: ${arg}`);
+    console.error('Usage: bun run build-executables.js [all|linux|macos|windows|current]');
+    process.exit(1);
+  }
+
+  console.log(`Building ${platformsToBuild.length} executable(s) with full optimizations...`);
+  console.log('Optimizations enabled: --minify --sourcemap');
+  const startTime = Date.now();
+
+  try {
+    const windowsPlatforms = platformsToBuild.filter(p => p.target.includes('windows'));
+    const otherPlatforms = platformsToBuild.filter(p => !p.target.includes('windows'));
+
+    let successCount = 0;
+
+    if (otherPlatforms.length > 0) {
+      await prepareBundle();
+
+      for (const platform of otherPlatforms) {
+        try {
+          await buildExecutable(platform.target, platform.output, false);
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to build ${platform.output}:`, error.message);
+        }
+      }
+    }
+
+    if (windowsPlatforms.length > 0) {
+      await prepareWindowsBundle();
+
+      for (const platform of windowsPlatforms) {
+        try {
+          await buildExecutable(platform.target, platform.output, true);
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to build ${platform.output}:`, error.message);
+        }
+      }
+    }
+
+    const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`\n✅ Successfully built ${successCount}/${platformsToBuild.length} executables in ${totalElapsed}s`);
+    console.log('\nExecutables are available in the dist/ directory');
+    console.log('\nNotes:');
+    console.log('- All executables include embedded assets (yoga.wasm, ripgrep binaries)');
+    console.log('- Modern variants require CPUs from 2013+ (AVX2 support)');
+    console.log('- Baseline variants support older CPUs (pre-2013)');
+    console.log('- Musl variants are for Alpine Linux and similar distributions');
+    console.log('- Windows builds have special handling for import.meta compatibility');
+    console.log('- All executables are optimized with minification and sourcemaps');
+  } finally {
+    await cleanupBundledFile();
+  }
+}
+
+main().catch(error => {
+  console.error('Build failed:', error);
+  process.exit(1);
+});

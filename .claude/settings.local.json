@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git clone:*)",
+      "Bash(cmd /c \"git clone https://github.com/winfunc/claude-code-single-binary .\")",
+      "Bash(powershell -Command \"git clone https://github.com/winfunc/claude-code-single-binary .\")",
+      "Bash(/c/Program Files/Git/bin/git.exe clone https://github.com/winfunc/claude-code-single-binary .)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(dir:*)",
+      "Bash(node scripts/test/test-builder.js:*)",
+      "Bash(/c/Program Files/nodejs/node.exe scripts/test/test-builder.js)",
+      "Bash(del \"D:\\AI\\Testing\\AtomCLI\\scripts\\test\\test-builder.js\")",
+      "Bash(cmd /c \"del D:\\AI\\Testing\\AtomCLI\\scripts\\test\\test-builder.js\")",
+      "Bash(/c/Windows/System32/cmd.exe /c \"del D:\\AI\\Testing\\AtomCLI\\scripts\\test\\test-builder.js\")",
+      "Bash(/c/Windows/System32/cmd.exe /c \"cd /d D:\\AI\\Testing\\AtomCLI && node scripts/test/test-builder.cjs\")",
+      "Bash(/c/Windows/System32/cmd.exe /c \"node D:\\AI\\Testing\\AtomCLI\\scripts\\test\\test-builder.cjs 2>&1\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" \"/d/AI/Testing/AtomCLI/scripts/test/test-builder.cjs\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" \"/d/AI/Testing/AtomCLI/scripts/test/test-builder.cjs\" --build)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require(''fs''); const c=fs.readFileSync(''/d/AI/Testing/AtomCLI/core/claude-code/package/cli.js'',''utf8''); const m=c.match(/process\\.env\\.CLAUDE_CODE_ENTRYPOINT[^;]+;?/g); console.log(m?m.slice(0,3):null)\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -e \"const fs=require(''fs''); const s=fs.statSync(''D:\\\\AI\\\\Testing\\\\AtomCLI\\\\distro\\\\windows\\\\claude-code-windows-x64.exe''); console.log(''Size:'', (s.size/1024/1024).toFixed(2), ''MB'')\")",
+      "Bash(/c/Windows/System32/cmd.exe /c \"dir D:\\AI\\Testing\\AtomCLI\\distro\\windows\")",
+      "Bash(/c/Windows/System32/cmd.exe /c \"cd /d D:\\AI\\Testing\\AtomCLI\\distro\\windows && dir\")",
+      "Bash(/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command \"Get-ChildItem ''D:\\AI\\Testing\\AtomCLI\\distro\\windows'' | Format-Table Name, Length -AutoSize\")"
+    ]
+  }
+}
